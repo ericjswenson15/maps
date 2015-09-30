@@ -1,0 +1,1528 @@
+<!DOCTYPE html>
+<!--[if IE 8 ]>    <html lang="en-US" class="ie8"> <![endif]-->
+<!--[if IE 9 ]>    <html lang="en-US" class="ie9"> <![endif]-->
+<!--[if (gt IE 9)|!(IE)]><!-->
+<html lang="en-US">
+<!--<![endif]-->
+<head>
+<meta charset="UTF-8" />
+<!--[if lt IE 8 ]><meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"><![endif]-->
+<title>Kenya Data Cube</title>
+<meta name="author" content="The Design Group">
+<!-- Viewport -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="assets/jquery-ui-1.11.4.custom/jquery-ui.css" type="text/css" media="screen, projection" />
+<link rel="stylesheet" href="assets/css/style.css" type="text/css" media="screen, projection" />
+<script src="jquery-2.1.4.min.js"></script>
+<script src="assets/jquery-ui-1.11.4.custom/jquery-ui.js"></script>
+<!--<script src="https://maps.googleapis.com/maps/api/js?v=3.exp&libraries=drawing"></script>-->
+<script src="drawmap.js"></script>
+<script src="wsupport.js"></script>
+<script>
+
+window.dc_requests = [];
+window.dc_workers = [];
+//window.setInterval(check_jobs,3000);
+/*
+* Online awareness
+*
+*/
+function amionline(){
+	//try to be jquery independant
+	var accessible = navigator.onLine;
+	try{
+
+		var xhr = new XMLHttpRequest();
+		r_id = Math.round(Math.random() * 10000);
+		var target_file = "http://bigdata-node2.ama-inc.com/kenya.png?test="+r_id;
+		xhr.open('HEAD',target_file,false);
+
+		xhr.send();
+		while(xhr.readyState!=4){
+
+		}
+		if(xhr.status>=200 && xhr.status<304){
+			return accessible || true;
+		} else{
+			console.log("Unable to reach server");
+			return accessible || false;
+		}
+	} catch(e){
+		console.log("Error "+e);
+		return false;
+	}
+}
+function store_result(criteria,img){
+	console.log("about to store results!");
+	var tar_img = new Image();
+	tar_img.addEventListener('load',function(){
+		console.log("storing "+criteria);
+		var imgcanvas = document.createElement("canvas");
+		imgcanvas.width = tar_img.width;
+		imgcanvas.height = tar_img.height;
+		imgctx = imgcanvas.getContext('2d');
+		imgctx.drawImage(tar_img,0,0,tar_img.width,tar_img.height);
+		var dURL = imgcanvas.toDataURL("image/png");
+		try{
+			localStorage.setItem(criteria,dURL);
+		} catch(e){
+			console.log("Storing image failed: "+e);
+
+		}
+	},false);
+	tar_img.src=img;
+}
+function store_str_result(criteria,str){
+	console.log("About to store "+criteria);
+	try{
+		localStorage.setItem(criteria,str);
+	} catch(e){
+		console.log("Storing data failed: "+e);
+
+	}
+}
+function get_result(criteria){
+	try{
+		var res = localStorage.getItem(criteria);
+		if(res){
+			return res;
+		} else {
+			return "";
+		}
+	} catch(e){
+		console.log("Accessing storage failed: "+e);
+	}
+}
+
+
+function build_criteria_str(){
+
+	var start = "";
+	var end = "";
+	var months = [];
+	var smode = $("#season_select").val();
+	if("none"==smode){
+		start = $("#season_no_restriction_start_date").val().replace(/\s/g,'');
+		if(start.length!=10){
+			console.log("invalid start date");
+			return;
+		}
+		end = $("#season_no_restriction_end_date").val().replace(/\s/g,'');
+		if(end.length!=10){
+			console.log("invalid end date");
+			return;
+		}
+	}
+	else if("custom"==smode){
+		var smonth = parseInt($("#season_custom_start_month").val());
+		var emonth = parseInt($("#season_custom_end_month").val());
+		var syear = $("#season_custom_start_year").val();
+		var eyear = $("#season_custom_end_year").val();
+		var sisnum = /^\d+$/.test(syear);
+		var eisnum = /^\d+$/.test(eyear);
+		if(!sisnum || !eisnum){
+			return;
+		}
+		if(syear.length!=4 || eyear.length != 4){
+			return;
+		}
+		start = syear+"-01-01";
+		end = eyear+"-01-01";
+		for(var i=smonth;i<=emonth;i++){
+			months.push(i);
+		}
+	}
+	else if("custom_annual"){
+		months = $("#months_sel").val();
+		var syear = $("#season_custom_annual_year").val();
+		var sisnum = /^\d+$/.test(syear);
+
+		if(!sisnum){
+			return;
+		}
+		if(syear.length!=4){
+			return;
+		}
+		start = syear+"-01-01";
+		end = syear+"-12-31";
+	}
+	//start = "2015-07-01";
+	//end = "2015-07-02";
+	bb = get_selection_bounds()
+	if(!bb){
+		console.log("no bounding box");
+		return;
+	}
+	console.log(bb);
+	x_arr = [];
+	x_index = parseInt(Math.floor(bb[0]));
+	window.x_min=x_index;
+	window.x_max = parseInt(Math.floor(bb[2]));
+
+	while (x_index <= x_max) {
+		x_arr.push(x_index);
+		x_index++;
+	}
+	x_arr = x_arr.join();
+	/*if(x_arr.slice(-1) == ','){
+                x_arr=x_arr.slice(0,-1);
+        }
+				*/
+	y_arr = [];
+	y_index = parseInt(Math.floor(bb[1]));
+	window.y_min=y_index;
+	window.y_max = parseInt(Math.floor(bb[3]));
+
+	while (y_index <= y_max) {
+		y_arr.push(y_index);
+		y_index++;
+	}
+	y_arr = y_arr.join();
+	if(y_arr.slice(-1) == ','){
+                y_arr=y_arr.slice(0,-1);
+        }
+	sat_arr = "LS7";
+	criteria_str = x_arr+'_'+y_arr+'_'+start+'_'+end+'_'+sat_arr;
+	if(smode=="custom"||smode=="custom_annual"){
+		criteria_str+="_"+months.join();
+	}
+	window.criteria_str=criteria_str;
+	return criteria_str;
+}
+window.selected_mosaics = [];
+function select_mosaic(rid){
+	var insert = true;
+	for(var i=0;i<window.selected_mosaics.length;i++){
+		if(rid==window.selected_mosaics){
+			window.selected_mosaics.splice(i,1);
+			$("#mosaic_"+rid).removeClass("sel_high");
+			insert = false;
+			break;
+		}
+	}
+	if(insert){
+		//FOR NOW TO SUPORT ONLY ONE PRODUCT BEING SELECTED
+		for(var i=0;i<window.selected_mosaics.length;i++){
+			$("#mosaic_"+window.selected_mosaics[i]).removeClass("sel_high");
+		}
+		window.selected_mosaics = [];
+
+		//normal
+		window.selected_mosaics.push(rid);
+		$("#mosaic_"+rid).addClass("sel_high");
+	}
+	dm.redraw();
+}
+function add_task_bar(rid,description){
+
+	var ih = "<li id=\"task_"+rid+"\"><span class=\"percentComplete\"></span><div class=\"progressbar_"+rid+"\"></div><span class=\"taskName\">"+description+"</span><span class=\"sep\"><a href=\"#\" onclick=\"cancel_task("+rid+")\">Cancel</a></li>";
+	$("#queueBody").append(ih);
+	$( ".progressbar_"+rid ).progressbar({value: 100});
+
+}
+function remove_task_bar(rid){
+	$("#task_"+rid).remove();
+}
+function cancel_task(rid){
+	var w = new Worker("dcw.js?q="+Math.round((Math.random()*9999)));
+	w.postMessage("cancel#"+rid);
+	w.onmessage = function(event){
+		var resp = event.data;
+		console.log("response from worker: "+resp);
+		var obj = JSON.parse(resp);
+		if(obj.msg=="end"){
+			w.terminate();
+			w = undefined;
+			remove_task_bar(obj.rid);
+		}
+	};
+	window.dc_workers.push(w);
+}
+function download_selected_mosaic(){
+	for(var i=0;i<window.selected_mosaics.length;i++){
+		var file_f = $("#export_format").val();
+		if(file_f == "choose-one"){
+			return;
+		}
+		var w = new Worker("dcw.js?q="+Math.round((Math.random()*9999)));
+		w.postMessage("download#"+window.selected_mosaics[i]+"#"+file_f);
+		w.onmessage = function(event){
+			var resp = event.data;
+			console.log("response from worker: "+resp);
+			var obj = JSON.parse(resp);
+			if(obj.msg == "download"){
+				window.location.href = "http://bigdata-node2.ama-inc.com"+obj.image+"/download";
+			}
+			else if(obj.msg=="start"){
+				add_task_bar(obj.rid,obj.description);
+			}
+			else if(obj.msg=="end"){
+				w.terminate();
+				w = undefined;
+				remove_task_bar(obj.rid);
+			}
+		};
+	}
+	window.dc_workers.push(w);
+}
+
+function build_criteria(){
+	cs = build_criteria_str();
+	if(!cs){
+		alert("Please confirm you have filled out all criteria before trying to submit or preview a task!");
+		return;
+	}
+	cs = cs.replace(/_/g,"/");
+
+
+	//significantly cleaner implementation
+	var w = new Worker("dcw.js?q="+Math.round((Math.random()*9999)));
+	w.postMessage("preview#"+cs+"/RED,GREEN,BLUE");
+	w.onmessage = function(event){
+		var resp = event.data;
+		console.log("response from worker: "+resp);
+		var obj = JSON.parse(resp);
+		if(obj.msg == "pixel_count"){
+			$("#resultsList").append("<li id=\"preview_"+obj.rid+"\">Request "+obj.rid+": "+obj.pixels+" pixels found</li>");
+			remove_task_bar(obj.rid);
+		}
+		else if(obj.msg == "result"){
+			var bounds_frame = obj.bounds.split(",");
+			window.preview_results.push({minlat:bounds_frame[0],minlng:bounds_frame[1],maxlat:bounds_frame[2],maxlng:bounds_frame[3],image:obj.image,alternative:obj.alternative,stats:obj.stats});
+			$("#resultsList").append("<li id=\"mosaic_"+obj.rid+"\" data-stats=\""+obj.stats+"\" data-rid=\""+obj.rid+"\" data-minlat=\""+bounds_frame[0]+"\" data-minlng=\""+bounds_frame[1]+"\" data-maxlat=\""+bounds_frame[2]+"\" data-maxlng=\""+bounds_frame[3]+"\" onclick=\"select_mosaic("+obj.rid+")\">Request "+obj.rid+": Mosaic Complete</li>");
+			dm.redraw();
+		}
+		else if(obj.msg == "download"){
+			window.location.href = "http://bigdata-node2.ama-inc.com"+obj.image+"/download";
+		}
+		else if(obj.msg=="start"){
+			add_task_bar(obj.rid,obj.description);
+		}
+		else if(obj.msg=="end"){
+			w.terminate();
+			w = undefined;
+			remove_task_bar(obj.rid);
+		}
+		else if(obj.msg=="store_task"){
+			add_task_to_storage(obj.task);
+		}
+	};
+	window.dc_workers.push(w);
+
+	/*
+	var jurl = "http://bigdata-node2.ama-inc.com:5555/list/"+cs+"/submit";
+	console.log("submiting list request");
+	$.get(jurl,function(data){
+		console.log(data);
+		var resp = $.parseJSON(data);
+		if(resp.request!="WAIT"){
+
+			window.dc_requests.push({rid:resp.request,status:"list",criteria:cs});
+		}
+	});
+	//$("#resultsList").html("");
+	//$("#resultsList").append("<li>24336000000 pixels found.</li><li>1833333 Hectares</li>");
+	window.criteria_str=cs;
+	//show_tile_results();
+	//jsonUrl = "http://bigdata-node2.ama-inc.com:5000/list/"+criteria_str;
+	*/
+}
+
+function submit_full_run(){
+	//Full mosaic (takes forever)
+	cs = build_criteria_str();
+	if(!cs){
+		alert("Please confirm you have filled out all criteria before trying to submit or preview a task!");
+		return;
+	}
+	cs = cs.replace(/_/g,"/");
+
+	var mode = $("#field11").val();
+	var bands = "";
+	if(mode == "true_color") {
+	        bands = "RED,GREEN,BLUE"
+	}
+	else if(mode == "tci_b") {
+                bands = "tci_b";
+	}
+	else if(mode == "tci_g") {
+								bands = "tci_g";
+	}
+	else if(mode == "tci_w") {
+								bands = "tci_w";
+	}
+	else if(mode == "false_color") {
+                bands = "SHORT_WAVE_INFRARED_2,NEAR_INFRARED,GREEN";
+	}
+	if(bands == ""){
+		return;
+	}
+	/*
+	var sub_req_jurl = "http://bigdata-node2.ama-inc.com:5555/mosaic/"+cs+"/"+bands+"/submit";
+	$.get(sub_req_jurl,function(data2){
+		var resp2 = $.parseJSON(data2);
+		if(resp2.request!="WAIT"){
+			window.dc_requests.push({rid:resp2.request,status:"mosaic",criteria:cs});
+
+		} else {
+			console.log("was told to wait");
+		}
+	});
+	*/
+	//significantly cleaner implementation
+
+	var w = new Worker("dcw.js?q="+Math.round((Math.random()*9999)));
+	w.postMessage("mosaic#"+cs+"/"+bands);
+	w.onmessage = function(event){
+		var resp = event.data;
+		var obj = JSON.parse(resp);
+		if(obj.msg == "pixel_count"){
+			//$("#resultsList").append("<li id=\"preview_"+obj.rid+"\">Request "+obj.rid+": "+obj.pixels+" pixels found</li>");
+			remove_task_bar(obj.rid);
+		}
+		else if(obj.msg == "result"){
+			var bounds_frame = obj.bounds.split(",");
+			$("#resultsList").append("<li id=\"mosaic_"+obj.rid+"\" data-stats=\""+obj.stats+"\" data-rid=\""+obj.rid+"\" data-minlat=\""+bounds_frame[0]+"\" data-minlng=\""+bounds_frame[1]+"\" data-maxlat=\""+bounds_frame[2]+"\" data-maxlng=\""+bounds_frame[3]+"\" onclick=\"select_mosaic("+obj.rid+")\">Request "+obj.rid+": Mosaic Complete</li>");
+			window.preview_results.push({minlat:bounds_frame[0],minlng:bounds_frame[1],maxlat:bounds_frame[2],maxlng:bounds_frame[3],image:obj.image,alternative:obj.alternative,stats:obj.stats});
+			dm.redraw();
+		}
+		else if(obj.msg=="start"){
+			add_task_bar(obj.rid,obj.description);
+		}
+		else if(obj.msg=="end"){
+			w.terminate();
+			w = undefined;
+			remove_task_bar(obj.rid);
+		}
+		else if(obj.msg=="store_task"){
+			add_task_to_storage(obj.task);
+		}
+	}
+	window.dc_workers.push(w);
+}
+
+
+window.check_lock=false;
+function check_jobs(){
+	/*
+	* Check on jobs we've submitted and handle them accordingly
+	*/
+	if(window.check_lock==true){
+		return;
+	}
+	window.check_lock=true;
+	var to_prune = [];
+	console.log("Checking jobs");
+	for(var i=0;i<window.dc_requests.length;i++){
+		var dc_request = window.dc_requests[i];
+		var status = dc_request.status;
+
+		if(status=="list"){
+			window.dc_requests[i].status="DONE"; //mark for deletion
+			console.log("checking list job ");
+			//list request submitted, check on it
+			var jurl = "http://bigdata-node2.ama-inc.com:5555/list/"+dc_request.rid+"/view";
+			$.get(jurl,function(data){
+				//console.log(data);
+				var resp = $.parseJSON(data);
+				if(resp.request=="DONE"){
+					var tile_list = resp.tiles;
+					var pixel_count = 4000*4000*tile_list.length;
+					$("#resultsList").append("<li id=\"preview_"+dc_request.rid+"\">Request "+dc_request.rid+": "+pixel_count+" pixels found</li>");
+					if(pixel_count==0){
+						window.dc_requests[i].status="DONE"; //mark for deletion
+					} else{
+
+						//Start generating the preview image.
+						var sub_req_jurl = "http://bigdata-node2.ama-inc.com:5555/mosaic/"+dc_request.criteria+"/RED,GREEN,BLUE/preview";
+						$.get(sub_req_jurl,function(data2){
+							var resp2 = $.parseJSON(data2);
+							if(resp2.request!="WAIT"){
+								window.dc_requests.push({rid:resp2.request,status:"preview",criteria:dc_request.criteria});
+
+							} else {
+								console.log("was told to wait");
+							}
+
+						});
+					}
+					}
+
+			});
+		}
+		else if(status=="preview"){
+			console.log("checking preview job");
+			var rid = dc_request.rid;
+			var jurl = "http://bigdata-node2.ama-inc.com:5555/mosaic/"+dc_request.rid+"/png/view/submit";
+			//attempt to translate
+			var sent = false;
+			$.get(jurl,function(data){
+				var resp = $.parseJSON(data);
+				if(resp.request!="WAIT"){
+					sent = true;
+					window.dc_requests.push({rid:resp.request,status:"preview_image",criteria:dc_request.criteria});
+
+				} else {
+					console.log("waiting to get image path");
+				}
+
+			});
+			jurl = "http://bigdata-node2.ama-inc.com:5555/mosaic/"+dc_request.rid+"/bounds/submit";
+			//attempt to translate
+			$.get(jurl,function(data){
+				var resp = $.parseJSON(data);
+				if(resp.request!="WAIT"){
+					window.dc_requests.push({rid:resp.request,status:"preview_bounds",criteria:dc_request.criteria});
+
+				} else{
+					console.log("waiting to check bounds");
+					sent = false;
+				}
+
+			});
+			if(sent){
+					window.dc_requests[i].status="DONE"; //mark for deletion
+			}
+
+		}
+		else if(status=="preview_image"){
+			console.log("Checking to see if image preview has been handled");
+			if(!window.preview_items){
+				window.preview_items=[];
+			}
+			var jurl = "http://bigdata-node2.ama-inc.com:5555/mosaic/"+dc_request.rid+"/view";
+			$.get(jurl,function(data){
+				var resp = $.parseJSON(data);
+				if(resp.request!="WAIT"){
+					var inserted = false;
+					console.log("received image: "+resp.request);
+					for(var i=0;i<window.preview_items.length;i++){
+						if(window.preview_items[i].cs == dc_request.criteria){
+							window.preview_items[i].image = resp.request;
+							inserted=true;
+							break;
+						}
+					}
+					if(!inserted){
+						window.preview_items.push({image:resp.request,cs:dc_request.criteria,bounds:""});
+
+					}
+					window.dc_requests[i].status="DONE"; //mark for deletion
+				}
+
+			});
+		}
+		else if(status=="preview_bounds"){
+			console.log("Checking to see if image preview has bounds determined");
+			if(!window.preview_items){
+				window.preview_items=[];
+			}
+			var jurl = "http://bigdata-node2.ama-inc.com:5555/mosaic/"+dc_request.rid+"/bounds/view";
+			$.get(jurl,function(data){
+				var resp = $.parseJSON(data);
+				if(resp.request!="WAIT"){
+					var inserted = false;
+					console.log("received bounds: "+resp.request);
+					for(var i=0;i<window.preview_items.length;i++){
+						if(window.preview_items[i].cs == dc_request.criteria){
+							window.preview_items[i].bounds = resp.request;
+							inserted=true;
+							break;
+						}
+					}
+					if(!inserted){
+						window.preview_items.push({bounds:resp.request,cs:dc_request.criteria,image:""});
+					}
+					window.dc_requests[i].status="DONE"; //mark for deletion
+				}
+
+			});
+		}
+		else if(status=="mosaic"){
+			console.log("checking preview job");
+			var rid = dc_request.rid;
+			var jurl = "http://bigdata-node2.ama-inc.com:5555/mosaic/"+dc_request.rid+"/png/view/submit";
+			//attempt to translate
+			var sent = false;
+			$.get(jurl,function(data){
+				var resp = $.parseJSON(data);
+				if(resp.request!="WAIT"){
+					sent = true;
+					window.dc_requests.push({rid:resp.request,status:"mosaic_image",criteria:dc_request.criteria});
+
+				} else {
+					console.log("waiting to get image path");
+				}
+
+			});
+			jurl = "http://bigdata-node2.ama-inc.com:5555/mosaic/"+dc_request.rid+"/bounds/submit";
+			//attempt to translate
+			$.get(jurl,function(data){
+				var resp = $.parseJSON(data);
+				if(resp.request!="WAIT"){
+					window.dc_requests.push({rid:resp.request,status:"mosaic_bounds",criteria:dc_request.criteria});
+
+				} else{
+					console.log("waiting to check bounds");
+					sent = false;
+				}
+
+			});
+			if(sent){
+					window.dc_requests[i].status="DONE"; //mark for deletion
+			}
+
+		}
+		else if(status=="mosaic_image"){
+			console.log("Checking to see if image preview has been handled");
+			if(!window.preview_items){
+				window.preview_items=[];
+			}
+			var jurl = "http://bigdata-node2.ama-inc.com:5555/mosaic/"+dc_request.rid+"/view";
+			$.get(jurl,function(data){
+				var resp = $.parseJSON(data);
+				if(resp.request!="WAIT"){
+					var inserted = false;
+					console.log("received image: "+resp.request);
+					for(var i=0;i<window.preview_items.length;i++){
+						if(window.preview_items[i].cs = dc_request.criteria){
+							window.preview_items[i].image = resp.request;
+							inserted=true;
+							break;
+						}
+					}
+					if(!inserted){
+						window.preview_items.push({image:resp.request,cs:dc_request.criteria,bounds:""});
+
+					}
+					window.dc_requests[i].status="DONE"; //mark for deletion
+				}
+
+			});
+		}
+		else if(status=="mosaic_bounds"){
+			console.log("Checking to see if image preview has bounds determined");
+			if(!window.preview_items){
+				window.preview_items=[];
+			}
+			var jurl = "http://bigdata-node2.ama-inc.com:5555/mosaic/"+dc_request.rid+"/bounds/view";
+			$.get(jurl,function(data){
+				var resp = $.parseJSON(data);
+				if(resp.request!="WAIT"){
+					var inserted = false;
+					console.log("received bounds: "+resp.request);
+					for(var i=0;i<window.preview_items.length;i++){
+						if(window.preview_items[i].cs = dc_request.criteria){
+							window.preview_items[i].bounds = resp.request;
+							inserted=true;
+							break;
+						}
+					}
+					if(!inserted){
+						window.preview_items.push({bounds:resp.request,cs:dc_request.criteria,image:""});
+					}
+					window.dc_requests[i].status="DONE"; //mark for deletion
+				}
+
+			});
+		}
+		else if(status=="DONE"){
+			to_prune.push(dc_request.rid);
+		}
+	}
+	var prune_count=0;
+	for(var i=0;i<to_prune.length;i++){
+		for(var j=0;j<window.dc_requests.length;j++){
+			var dc_request = window.dc_requests[j];
+			if(dc_request.rid==to_prune[i]){
+				window.dc_requests.splice(j,1);
+				break;
+			}
+		}
+	}
+
+	//logic to insert complete previews on the map
+
+	for(var i=0;i<window.preview_items.length;i++){
+		var preview_item = window.preview_items[i];
+		if(preview_item.image.length>0 && preview_item.bounds.length>0){
+
+			var push_preview=true;
+			for(var j=0;j<window.preview_results;j++){
+				if(window.preview_results.image==preview_item.image){
+					push_preview=false;
+					break;
+				}
+			}
+			if(true){
+				var bounds_frame = preview_item.bounds.split(",");
+				window.preview_results.push({minlat:bounds_frame[0],minlng:bounds_frame[1],maxlat:bounds_frame[2],maxlng:bounds_frame[3],image:preview_item.image});
+			}
+		}
+	}
+	dm.redraw();
+	window.check_lock=false;
+}
+
+function build_mosaic(){
+
+
+
+	mode = $("#field11").val();
+	console.log(mode);
+	jsonUrl="";
+	cs = build_criteria_str();
+	if(!cs){
+		return;
+	}
+	if(mode == "true_color") {
+	        jsonUrl = "http://bigdata-node2.ama-inc.com:5000/cloudfree/"+window.criteria_str;
+					window.criteria_mode="rgb_tiles/tile_rgb";
+	}
+	else if(mode == "tci_b") {
+                jsonUrl = "http://bigdata-node2.ama-inc.com:5000/tci/"+window.criteria_str;
+								window.criteria_mode="b_tiles/kenya_b_tile_tci";
+	}
+	else if(mode == "tci_g") {
+								jsonUrl = "http://bigdata-node2.ama-inc.com:5000/tci/"+window.criteria_str;
+								window.criteria_mode="g_tiles/kenya_g_tile_tci";
+	}
+	else if(mode == "tci_w") {
+								jsonUrl = "http://bigdata-node2.ama-inc.com:5000/tci/"+window.criteria_str;
+								window.criteria_mode="w_tiles/kenya_w_tile_tci";
+	}
+	else if(mode == "false_color") {
+                jsonUrl = "http://bigdata-node2.ama-inc.com:5000/falsecolor/"+window.criteria_str;
+								window.criteria_mode="fc_tiles/tile_fc";
+	}
+
+	window.getting_mosaic = 1;
+	show_loading();
+	setTimer(cs);
+
+}
+function setTimer(reqid){
+	console.log("depriciated function setTimer called");
+	// window.session = window.setTimeout(check_mosaic,2000,reqid);
+}
+function check_mosaic(reqid){
+	window.tiles = [];
+	window.scenes_to_draw = [];
+	//dm.current_draw = [];
+	dm.redraw();
+	crit = reqid.split("_");
+	x_arr = crit[0].split(',');
+	y_arr = crit[1].split(',');
+	mode_pre = window.criteria_mode
+	for(var i=0;i<x_arr.length;i++){
+		x = parseFloat(x_arr[i]);
+		for(var j=0;j<y_arr.length;j++){
+			y = parseFloat(y_arr[j]);
+			//console.log("putting image: "+x+", "+y+": "+mode_pre+x+"_"+y+".tif.png");
+			//dm.insertImageAtLatLng(y,x,y+1.0,x+1.0,mode_pre+x+"_"+y+".tif.png");
+			var tmp_tile = y+","+x+","+mode_pre+x+"_"+y+".tif.png";
+			console.log(tmp_tile);
+			window.tiles.push(tmp_tile);
+			console.log("About to check scenes");
+			addScenes(y,x,y+1.0,x+1.0);
+		}
+	}
+
+	$("#resultsList").html("");
+	$("#resultsList").append("<li><a href=\"kenya.jpg\">Mosaic Preview</a></li>");
+	done_loading_mosaic();
+	dm.redraw();
+
+
+}
+function show_search() {
+	$(".slider").click();
+}
+function show_loading() {
+
+	window.curr_task = add_task("Building Mosaic",criteria_str,"");
+	//setTimeout(show_marker_demo_2,1000);
+}
+function done_loading_mosaic() {
+
+	remove_task(window.curr_task);
+	window.clearInterval(window.session);
+	//setTimeout(show_marker_demo_2,1000);
+}
+function show_tile_results(){
+	$(".resultsSlider").click();
+}
+//slide out criteria panel
+$(function(){
+	$('.optionsSlider').click(function(){
+		if($(this).hasClass('show')){
+			$(".left_panel").animate({
+				left:"+=400"
+				}, 700, function() {
+					if($(".resultsSlider").hasClass('hide')){
+						$(".resultsSlider").click();
+					}
+				});
+			$(this).removeClass('show').addClass('hide');
+		}
+		else {
+			$('.left_panel').animate({
+				left:"-=400"
+				}, 700, function() {
+					//$(".slider_right").click();
+				});
+			$(this).removeClass('hide').addClass('show');
+		}
+	});
+});
+
+
+
+$(function(){
+	$("#startdate_selector").datepicker({dateFormat: 'yy-mm-dd',defaultDate:'2000-01-01'});
+	$("#enddate_selector").datepicker({dateFormat: 'yy-mm-dd',defaultDate:'2015-06-01'});
+	//$("#tile_criteria").accordion();
+	//$("#accordion").accordion({heightStyle: "content"});
+	//$("#build_mosaic").accordion();
+	//window.tile_results_panel=$("#tile_results").accordion();
+	var satellite_names = [
+		"ls7",
+		"ls8"
+	];
+	function split(val) {
+		return val.split(/,\s*/);
+	}
+	function extractLast(term) {
+		return split(term).pop();
+	}
+//	$("#satellite_selector").autocomplete({
+//		source:satellite_names
+//	});
+	$("#satellite_selector").bind("keydown", function(event){
+		if(event.keyCode === $.ui.keyCode.TAB &&
+			$(this).autocomplete("instance").menu.action ) {
+				event.preventDefault();
+		}
+	}).autocomplete({
+		minLength:0,
+		source:function(request,response) {
+			response($.ui.autocomplete.filter(
+				satellite_names, extractLast(request.term)));
+		},
+		focus: function() { return false; },
+		select: function(event, ui) {
+			var terms = split(this.value);
+			terms.pop();
+			terms.push(ui.item.value);
+			terms.push("");
+			this.value = terms.join(", ");
+			return false;
+		}
+	});
+
+});
+
+</script>
+</head>
+<body onload="change_draw_method();">
+<div id="wrap">
+	<header id="header-main">
+		<div class="spacer"></div>
+		<h1 id="brand-main"><a href="#"></a><img src="assets/media/alpha.png" style="postion:absolute"></h1>
+		<nav id="main-nav">
+			<ul>
+				<li><a href="index.html">Home</a></li>
+				<li class="active"><a href="#">Map Tool</a></li>
+				<li><a href="graph_tool.html">Graph Tool</a></li>
+				<li><a href="task_manager.html">Task Manager</a></li>
+				<li><a href="#">Comparison Tool</a></li>
+				<li><a href="Cesium/Apps/tileDemo/index.html">Visualization<img src="assets/icons/flask2.png" /></a></li>
+			</ul>
+		</nav>
+		<nav id="utility-nav">
+			<ul>
+				<li><a href="" class="nav-properties">Preferences</a></li>
+
+				<li><a href="" class="nav-cset">CSET</a></li>
+			</ul>
+		</nav>
+	</header>
+	<div id="main-content">
+		<div id="infoPanel" class="panel right_panel"  style="background-color:#fff;">
+			<h2>Information</h2>
+			<form>
+				<div style="background-color:#fff;">
+					<p>Please select your data products, date options, and specify a shape for the area you would like to request. The selectable bounds of this application are from <b>-7 to 7 latitude</b> and from <b>33 to 42 longitude</b>. Finally, select your product type to view a mosaic product.</p>
+					<!--<hr />-->
+					<p>You may click on a completed mosaic task entry in the bottom left of the options panel to select that product and then choose an export format and download the product. You may right click on a mosaic to show the scenes that compose this mosaic.</p>
+				</div>
+				<!--
+				<h2>Coordinates</h2>
+				<div style="padding-left:25px;">
+					<p>Lat: <span id="mlat"></span></p>
+					<p>Lng: <span id="mlng"></span></p>
+				</div>
+			-->
+			</form>
+			<!-- BEGIN QUEUE -->
+
+
+
+					<div class="queueHeader">
+						<h2 style="padding-right:10px;">Queue</h2>
+						<button class="yellowButton" type="button" onclick="document.location='task_manager.html'">Open Task Manager</button>
+					</div>
+					<div class="queueBody" style="background-color:#fff;">
+						<ul id="queueBody" style="height:200px; overflow:hidden; overflow-y:scroll;">
+
+						</ul>
+						<script>
+
+							function hash(str){
+								var hash = 0;
+	    					for (i = 0; i < str.length; i++) {
+	        				char = str.charCodeAt(i);
+	        				hash = char + (hash << 6) + (hash << 16) - hash;
+	    					}
+	    					return hash;
+							}
+							function add_task(task,taskid,tasktype){
+								ti = hash(taskid)
+								ih = "<li id=\"task_"+ti+"\"><span class=\"percentComplete\"></span><div class=\"progressbar_"+ti+"\"></div><span class=\"taskName\">"+task+"</span><span class=\"sep\">/</span><span class=\"taskType\">"+tasktype+"</span><a href=\"\">Cancel</a></li>";
+								$("#queueBody").append(ih);
+								$( ".progressbar_"+ti ).progressbar({value: 100});
+								return ti;
+							}
+							function remove_task(taskid){
+								$("#task_"+taskid).remove();
+							}
+							function clearMosaic(){
+								window.tiles = [];
+								window.preview_items=[];
+								window.preview_results = [];
+								dm.redraw();
+							}
+						</script>
+				</div>
+				<div>
+					<h2>Metadata</h2>
+					<div>
+						<p>Scenes:<ul id="scene_composed" style="height:100px;overflow:hidden;overflow-y:scroll;"></ul></p>
+					</div>
+				</div>
+		</div>
+		<div id="map-canvas"><center><canvas id="canvas" width=1200 height=1200 style="width:1200px;height:1200px;">Your browser does not support HTML5 canvases!</canvas></center></div>
+		<div id="optionsPanel" class="panel left_panel">
+			<div class="panelContainer">
+				<h2>Options</h2>
+				<form>
+					<div id="accordion">
+						<h3>Source Options</h3>
+						<div class="accordionContent">
+							<div class="fieldSet">
+								<label id="label1" for="field1">Data Products</label>
+								<div class="field">
+									<select id="fielz1" name="field1" tabindex="1" data-native-menu="false" multiple >
+										<option value="LS7" >Landsat 7 SR</option>
+										<option value="LS8" disabled>Landsat 8 SR</option>
+										<option value="SPOT6" disabled>Spot 6</option>
+										<option value="MODIS250" disabled>MODIS 250m</option>
+
+									</select>
+								</div>
+								<div class="helper" title="These are the datasets which will be used for acquiring good pixels"><a>?</a></div>
+							</div>
+							<hr />
+							<div class="fieldSet">
+								<label id="label2" for="field2">Image Date</label>
+								<div class="field">
+									<!--<input type="text" id="startdate_selector"/>&nbsp;&nbsp;<input type="text" id="enddate_selector"/>-->
+								</div>
+								<div class="helper" title="Select the date range(s) you want to search for data along"><a>?</a></div>
+							</div>
+							<div class="fieldSet">
+								<label id="label2" for="field2">Season</label>
+								<div class="field">
+									<select id="season_select" name="field2" tabindex="" data-native-menu="false" >
+										<option value="none" class="season_no_restriction" selected>No Restriction</option>
+										<option value="custom" class="season_custom">Custom</option>
+										<option value="custom_annual" class="season_custom_annual">Custom Annual</option>
+
+
+									</select>
+								</div>
+								<div class="helper" title="Select the months or range of dates to use"><a>?</a></div>
+							</div>
+							<div id="season_no_restriction_dates" class="season_dates_block">
+								<div class="fieldSet">
+								<label for="season_no_restriction_from">Start Date</label>
+								<input type="text" id="season_no_restriction_start_date" name="season_no_restriction_start_date">
+								<br/>
+								<label for="season_no_restriction_to">End Date</label>
+								<input type="text" id="season_no_restriction_end_date" name="season_no_restriction_end_date">
+								</div>
+							</div>
+							<div id="season_custom_dates" class="season_dates_block">
+
+								<div class="fieldSet">
+									<label>Season Begins</label>
+									<label class="smallLabel">Month</label>
+									<select id="season_custom_start_month" name="field1" tabindex="1" data-native-menu="false">
+										<option value="1" >January</option>
+										<option value="2" >February</option>
+										<option value="3" >March</option>
+										<option value="4" >April</option>
+										<option value="5" >May</option>
+										<option value="6" >June</option>
+										<option value="7" >July</option>
+										<option value="8" >August</option>
+										<option value="9" >September</option>
+										<option value="10" >October</option>
+										<option value="11" >November</option>
+										<option value="12" >December</option>
+									</select>
+									<!--<input type="text" id="season_custom_start_month" name="season_custom_start_month" style="width:25px" />-->
+									<!--<label class="smallLabel">Day</label>
+									<input type="text" id="season_custom_start_day" name="season_custom_start_day" style="width:35px" />-->
+								</div>
+								<div class="fieldSet">
+								<label>Season Ends</label>
+								<label class="smallLabel">Month</label>
+								<select id="season_custom_end_month" name="field1" tabindex="1" data-native-menu="false">
+									<option value="1" >January</option>
+									<option value="2" >February</option>
+									<option value="3" >March</option>
+									<option value="4" >April</option>
+									<option value="5" >May</option>
+									<option value="6" >June</option>
+									<option value="7" >July</option>
+									<option value="8" >August</option>
+									<option value="9" >September</option>
+									<option value="10" >October</option>
+									<option value="11" >November</option>
+									<option value="12" >December</option>
+								</select>
+								<!--<input type="text" id="season_custom_end_month" name="season_custom_end_month" style="width:25px" />-->
+								<!--<label class="smallLabel">Day</label>
+								<input type="text" id="season_custom_end_day" name="season_custom_end_day" style="width:35px" />-->
+								</div>
+								<div class="fieldSet">
+								<label for="season_custom_start_year">Start Year</label>
+								<input type="text" id="season_custom_start_year" name="season_custom_start_year" style="width:75px" />
+								<br>
+								<label for="season_custom_end_year">End Year</label>
+								<input type="text" id="season_custom_end_year" name="season_custom_end_year" style="width:75px" />
+								</div>
+							</div>
+							<div id="season_custom_annual" class="season_dates_block">
+								<label id="label1" for="field1">Months</label>
+								<select id="months_sel" name="field1" tabindex="1" data-native-menu="false" multiple >
+									<option value="1" >January</option>
+									<option value="2" >February</option>
+									<option value="3" >March</option>
+									<option value="4" >April</option>
+									<option value="5" >May</option>
+									<option value="6" >June</option>
+									<option value="7" >July</option>
+									<option value="8" >August</option>
+									<option value="9" >September</option>
+									<option value="10" >October</option>
+									<option value="11" >November</option>
+									<option value="12" >December</option>
+								</select>
+
+								<div class="fieldSet">
+								<label for="season_custom_start_year">Year</label>
+								<input type="text" id="season_custom_annual_year" name="season_custom_start_year" style="width:75px" />
+								</div>
+							</div>
+							<div id="season_preset_dates" class="season_dates_block">
+								<div class="fieldSet">
+								<label for="season_preset_start_year">Start Year</label>
+								<input type="text" id="season_preset_start_year" name="season_preset_start_year" style="width:75px" />
+								<br/>
+								<label for="season_preset_end_year">End Year</label>
+								<input type="text" id="season_preset_end_year" name="season_preset_end_year" style="width:75px"/>
+								</div>
+							</div>
+							<div id="season_error_dates" class="season_dates_block"> You Have selected an invalid Season. </div>
+							<script>
+										$(document).ready(function(){
+											selected_season_type = $('#season_select option:selected').attr('class');
+											show_season_dates_block(selected_season_type);
+
+											$( "#season_no_restriction_start_date" ).datepicker({
+											  defaultDate: "+1w",
+											  changeMonth: true,
+											  numberOfMonths: 3,
+											  changeMonth: true,
+      										  changeYear: true,
+														dateFormat: 'yy-mm-dd',
+											  onClose: function( selectedDate ) {
+												$( "#season_no_restriction_end_date" ).datepicker( "option", "minDate", selectedDate,{dateFormat: 'yy-mm-dd'} );
+												build_criteria_str();
+											  }
+											});
+											$( "#season_no_restriction_end_date" ).datepicker({
+											  defaultDate: "+1w",
+											  changeMonth: true,
+											  numberOfMonths: 3,
+											  changeMonth: true,
+      										  changeYear: true,
+														dateFormat: 'yy-mm-dd',
+											  onClose: function( selectedDate ) {
+												$( "#season_no_restriction_start_date" ).datepicker( "option", "maxDate", selectedDate );
+												$( "#season_no_restriction_start_date" ).datepicker( "option", "altFormat", "yy-mm-dd" );
+												build_criteria_str();
+											  }
+											});
+										});
+
+										$(document).on('change','#season_select',function(){
+											selected_season_type = $('#season_select option:selected').attr('class');
+											show_season_dates_block(selected_season_type);
+											build_criteria_str();
+										});
+
+										function show_season_dates_block(type){
+											$('.season_dates_block').hide();
+											switch(type) {
+												case 'season_no_restriction':
+													$('#season_no_restriction_dates').show();
+													break;
+												case 'season_custom':
+													$('#season_custom_dates').show();
+													break;
+												case 'season_preset':
+													$('#season_preset_dates').show();
+													break;
+												case 'season_custom_annual':
+													$('#season_custom_annual').show();
+													break;
+												default:
+													$('#season_error_dates').show();
+													break;
+											}
+										}
+									</script>
+									<style>
+										div.season_dates_block{display:none;}
+									</style>
+
+						</div>
+						<!--
+						<h3>Mask</h3>
+						<div class="accordionContent">
+
+							<div class="fieldSet">
+								<label>Clouds<input type="checkbox" checked disabled/></label>
+
+								<label>Snow<input type="checkbox" checked disabled/></label>
+
+								<label>Water<input type="checkbox" checked disabled/></label>
+								<div class="helper" title="Select the criteria for bad data"><a>?</a></div>
+							</div> </div>-->
+						<h3>Shape</h3>
+						<div class="accordionContent">
+							<div class="fieldSet threeRadials">
+								<label for="latLong-box">
+									<input id="latLong-box" type="radio" name="shape_type" value="lat long box" checked onchange="change_draw_method()">
+									Lat/Long</label>
+								<label for="bounding-box">
+									<input type="radio" id="bounding-box" name="shape_type" value="select bounding box" onchange="change_draw_method()">
+									Bounding Box</label>
+								<label for="shape-selector">
+									<input type="radio" id="shape-selector" name="shape_type" value="shape selector" disabled>
+									Shape Selector</label>
+							</div>
+							<hr />
+							<script>
+							function change_draw_method(){
+								var llbbox = document.getElementById("latLong-box");
+								var bbox = document.getElementById("bounding-box");
+								if(llbbox.checked){
+									dm.enableDrawing(false);
+									reshape_bb();
+								} else if(bbox.checked){
+									dm.enableDrawing(true);
+								}
+							}
+
+							function reshape_bb(){
+								dm.current_draw = [];
+								dm.redraw();
+								var str_minlon = $("#lon_box_min").val();
+								var str_maxlon = $("#lon_box_max").val();
+								var str_minlat = $("#lat_box_min").val();
+								var str_maxlat = $("#lat_box_max").val();
+								if( str_minlon.length < 1 || str_maxlon.length < 1 || str_minlat.length < 1 || str_maxlat.length < 1){
+									return;
+								}
+								else if (parseFloat(str_minlon)>parseFloat(str_maxlon)||parseFloat(str_minlat)>parseFloat(str_maxlat)) {
+									return;
+								}
+								else {
+
+									dm.current_draw = [];
+									dm.current_draw.push({lat:(parseFloat(str_minlat)+0.01),lng:(parseFloat(str_minlon)+0.01)});
+									dm.current_draw.push({lat:(parseFloat(str_maxlat)-0.01),lng:(parseFloat(str_maxlon)-0.01)});
+									dm.redraw();
+								}
+							}
+							</script>
+							<div id="shape_lat_long_box_block" class="shape_block">
+								<div class="fieldSet">
+									<label>Longitude</label>
+									<label class="smallLabel">Min</label>
+									<input id="lon_box_min" type="text" style="width:75px;" onKeyDown="reshape_bb()" onKeyUp="reshape_bb()"/>
+									<label class="smallLabel">Max</label>
+									<input id="lon_box_max" style="width:75px;" onKeyDown="reshape_bb()" onKeyUp="reshape_bb()"/>
+								</div>
+								<div class="fieldSet">
+									<label>Latitude</label>
+									<label class="smallLabel">Min</label>
+									<input id="lat_box_min" type="text" style="width:75px;" onKeyDown="reshape_bb()" onKeyUp="reshape_bb()" />
+									<label class="smallLabel">Max</label>
+									<input id="lat_box_max" style="width:75px;" onKeyDown="reshape_bb()" onKeyUp="reshape_bb()"/>
+								</div>
+							</div>
+							<div id="shape_select_box_block" class="shape_block"> SELECT BOUNDING BOX </div>
+							<div id="shape_selector_block" class="shape_block"> SHAPE SELECTOR </div>
+							<div id="shape_error_block" class="shape_block"> You have selected an invalid shape type. </div>
+							<script>
+
+						$(document).ready(function(){
+							selected_shape_type = $('input[name=shape_type]:checked').val();
+							show_shape_type_block(selected_shape_type);
+						});
+
+						$(document).on('change','input[name=shape_type]',function(){
+							selected_shape_type =$('input[name=shape_type]:checked').val();
+							show_shape_type_block(selected_shape_type);
+						});
+
+						function show_shape_type_block(type){
+							$('.shape_block').hide();
+							switch(type) {
+								case 'lat long box':
+									$('#shape_lat_long_box_block').show();
+									break;
+								case 'select bounding box':
+									$('#shape_select_box_block').show();
+									break;
+								case 'shape selector':
+									$('#shape_selector_block').show();
+									break;
+								default:
+									$('#shape_error_block').show();
+									break;
+							}
+						}
+					</script>
+							<style>
+						div.shape_block{display:none;}
+					</style>
+						</div>
+					</div>
+					<div class="panelBottom">
+					<div class="fieldSet">
+						<h3>Preview Options</h3>
+								<label id="label3" for="field3">Product Type</label>
+								<div class="field">
+									<select id="field11" name="field2" tabindex="" data-native-menu="false" onchange="build_criteria_str();" >
+										<option value="choose-one" data-placeholder="true">Choose one...</option>
+										<option value="true_color" >True Color</option>
+										<option value="tci_b" >Tasselled Cap Brightness</option>
+										<option value="tci_g" >Tasselled Cap Greenness</option>
+										<option value="tci_w" >Tasselled Cap Wetness</option>
+										<option value="false_color" >False Color</option>
+										<option value="" >None</option>
+									</select>
+								</div>
+								<div class="helper" title="Select the type of mosaic to produce"><a>?</a></div>
+							</div>
+							<!--
+						<div class="fieldSet">
+							<label id="label1" for="field1">Name</label>
+							<div class="field">
+								<input type="text"/>
+							</div>
+							<div class="helper"><a>?</a></div>
+						</div>
+					-->
+						<div class="submitBlock">
+							<button class="greyButton" type="button" onclick="build_criteria()">Sample Task</button>
+							<button class="greyButton" type="button" onclick="submit_full_run()">Submit Task</button>
+
+							<button class="greyButton" type="button" onclick="clearMosaic()">Clear Mosaic</button>
+
+
+
+							<ul class="resultsList" id="resultsList" style="height:50px;overflow:hidden;overflow-y:scroll;">
+								<!--
+								<li>Pixels: 230158</li>
+								<li>Hectares: 1207</li>
+								<li>Estimate Run Time: 3d, 2hr, 37min</li>
+							-->
+							</ul>
+							<!--<label>Scene <input type="checkbox" id="samscene" /></label>-->
+							<label>Show missing pixels <input type="checkbox" id="show_missing" onclick="dm.redraw()"/></label>
+							<hr />
+							<h3>Output Options</h3>
+							<label style="padding-right:10px;">Export format <select id="export_format" name="field2" tabindex="" data-native-menu="false" >
+								<option value="choose-one" data-placeholder="true">Choose one...</option>
+								<option value="JPEG" >JPEG</option>
+								<option value="GTiff" >GeoTIFF</option>
+
+
+
+							</select></label><button class="greyButton" type="button" onclick="download_selected_mosaic()">Download product</button>
+						</div>
+					</div>
+				</form>
+			</div>
+		</div>
+
+
+
+
+	</div>
+</div>
+
+
+<script>
+
+</script>
+<script>
+
+function get_selection_bounds(){
+	//format [x_min,y_min,x_max,y_max]
+	var bb = dm.getDrawnBoundsLatLng()
+	if(!bb){
+		return;
+	}
+	res = []
+	res[0] = bb.ul.lng;
+	res[1]=bb.ll.lat;
+	res[2]=bb.ur.lng;
+	res[3]=bb.ur.lat;
+	return res;
+}
+/*
+google.maps.event.addDomListener(window, 'load', initialize);
+*/
+//window.DRAWMAP_DEBUG=true;
+window.tiles = [];
+window.preview_results = [];
+window.sample_scenes = [];
+window.scenes_to_draw = [];
+window.preview_items = [];
+window.select_rects = [];
+/*
+window.sample_scenes[0]={};
+window.sample_scenes[0].minlat=-0.941923;
+window.sample_scenes[0].minlng=36.324226;
+window.sample_scenes[0].maxlat=0.950065;
+window.sample_scenes[0].maxlng=38.491492;
+window.sample_scenes[0].path = "LE71680602015093SG100.png";
+*/
+window.sample_scenes.push({minlat:3.387482, maxlat:5.302674, minlng:41.861617,maxlng:43.980215,path:"scenes_pngs/LE71650572005268.png"});
+window.sample_scenes.push({minlat:1.942375, maxlat:3.853168, minlng:41.538811,maxlng:43.657768,path:"scenes_pngs/LE71650582007082.png"});
+window.sample_scenes.push({minlat:-0.952262, maxlat:0.954974, minlng:40.949611,maxlng:43.055696,path:"scenes_pngs/LE71650602005012.png"});
+window.sample_scenes.push({minlat:-2.384937, maxlat:-0.503608, minlng:40.620919,maxlng:42.767885,path:"scenes_pngs/LE71650612007226.png"});
+window.sample_scenes.push({minlat:-3.845072, maxlat:-1.934304, minlng:40.314358,maxlng:42.433286,path:"scenes_pngs/LE71650622007066.png"});
+window.sample_scenes.push({minlat:-5.291848, maxlat:-3.373970, minlng:40.002669,maxlng:42.126613,path:"scenes_pngs/LE71650632005316.png"});
+window.sample_scenes.push({minlat:3.397198, maxlat:5.285827, minlng:40.318616,maxlng:42.467153,path:"scenes_pngs/LE71660572007137.png"});
+window.sample_scenes.push({minlat:1.943011, maxlat:3.850894, minlng:40.028483,maxlng:42.136573,path:"scenes_pngs/LE71660582005195.png"});
+window.sample_scenes.push({minlat:0.495966, maxlat:2.404719, minlng:39.696347,maxlng:41.800832,path:"scenes_pngs/LE71660592007073.png"});
+window.sample_scenes.push({minlat:-0.933801, maxlat:0.944657, minlng:39.345853,maxlng:41.489011,path:"scenes_pngs/LE71660602007329.png"});
+window.sample_scenes.push({minlat:-2.394036, maxlat:-0.493471, minlng:39.119393,maxlng:41.232012,path:"scenes_pngs/LE71660612005355.png"});
+window.sample_scenes.push({minlat:-3.827092, maxlat:-1.947555, minlng:38.765691,maxlng:40.916399,path:"scenes_pngs/LE71660622008092.png"});
+window.sample_scenes.push({minlat:-5.273666, maxlat:-3.391292, minlng:38.415977,maxlng:40.571135,path:"scenes_pngs/LE71660632007329.png"});
+window.sample_scenes.push({minlat:3.390716, maxlat:5.298091, minlng:38.781459,maxlng:40.893241,path:"scenes_pngs/LE71670572005234.png"});
+window.sample_scenes.push({minlat:1.942465, maxlat:3.851519, minlng:38.487376,maxlng:40.595058,path:"scenes_pngs/LE71670582007016.png"});
+window.sample_scenes.push({minlat:0.493722, maxlat:2.402183, minlng:38.183183,maxlng:40.288052,path:"scenes_pngs/LE71670592005250.png"});
+window.sample_scenes.push({minlat:-0.944674, maxlat:0.955531, minlng:37.860264,maxlng:39.968994,path:"scenes_pngs/LE71670602005266.png"});
+window.sample_scenes.push({minlat:-2.391327, maxlat:-0.490973, minlng:37.538414,maxlng:39.648626,path:"scenes_pngs/LE71670612006253.png"});
+window.sample_scenes.push({minlat:-3.840663, maxlat:-1.934192, minlng:37.269017,maxlng:39.379320,path:"scenes_pngs/LE71670622005170.png"});
+window.sample_scenes.push({minlat:-5.287235, maxlat:-3.379517, minlng:36.935423,maxlng:39.049772,path:"scenes_pngs/LE71670632005138.png"});
+window.sample_scenes.push({minlat:3.401771, maxlat:5.284521, minlng:37.214140,maxlng:39.363834,path:"scenes_pngs/LE71680572007135.png"});
+window.sample_scenes.push({minlat:1.958184, maxlat:3.840663, minlng:36.899045,maxlng:39.049673,path:"scenes_pngs/LE71680582008250.png"});
+window.sample_scenes.push({minlat:0.498851, maxlat:2.404875, minlng:36.643047,maxlng:38.750295,path:"scenes_pngs/LE71680592005257.png"});
+window.sample_scenes.push({minlat:-0.947340, maxlat:0.955483, minlng:36.313448,maxlng:38.424094,path:"scenes_pngs/LE71680602006228.png"});
+window.sample_scenes.push({minlat:-2.396456, maxlat:-0.490453, minlng:35.990781,maxlng:38.097870,path:"scenes_pngs/LE71680612005321.png"});
+window.sample_scenes.push({minlat:-3.828973, maxlat:-1.942604, minlng:35.652191,maxlng:37.808795,path:"scenes_pngs/LE71680622010111.png"});
+window.sample_scenes.push({minlat:3.386860, maxlat:5.299634, minlng:35.675113,maxlng:37.799301,path:"scenes_pngs/LE71690572006059.png"});
+window.sample_scenes.push({minlat:1.942041, maxlat:3.855609, minlng:35.379683,maxlng:37.495964,path:"scenes_pngs/LE71690582005088.png"});
+window.sample_scenes.push({minlat:0.495393, maxlat:2.406398, minlng:35.077700,maxlng:37.186846,path:"scenes_pngs/LE71690592005136.png"});
+window.sample_scenes.push({minlat:-0.933383, maxlat:0.946948, minlng:34.742125,maxlng:36.886224,path:"scenes_pngs/LE71690602007270.png"});
+window.sample_scenes.push({minlat:-2.379757, maxlat:-0.503733, minlng:34.397219,maxlng:36.547061,path:"scenes_pngs/LE71690612007334.png"});
+window.sample_scenes.push({minlat:-3.845333, maxlat:-1.929247, minlng:34.133660,maxlng:36.249861,path:"scenes_pngs/LE71690622007078.png"});
+window.sample_scenes.push({minlat:4.832556, maxlat:6.742433, minlng:34.448114,maxlng:36.563079,path:"scenes_pngs/LE71700562005047.png"});
+window.sample_scenes.push({minlat:3.392412, maxlat:5.291553, minlng:34.170104,maxlng:36.286101,path:"scenes_pngs/LE71700572005175.png"});
+window.sample_scenes.push({minlat:1.943353, maxlat:3.851105, minlng:33.836981,maxlng:35.947696,path:"scenes_pngs/LE71700582005223.png"});
+window.sample_scenes.push({minlat:0.496030, maxlat:2.402077, minlng:33.537285,maxlng:35.644499,path:"scenes_pngs/LE71700592005239.png"});
+window.sample_scenes.push({minlat:-0.947380, maxlat:0.950094, minlng:33.243405,maxlng:35.354317,path:"scenes_pngs/LE71700602005255.png"});
+window.sample_scenes.push({minlat:-2.394041, maxlat:-0.485405, minlng:32.900925,maxlng:35.008202,path:"scenes_pngs/LE71700612006162.png"});
+window.sample_scenes.push({minlat:4.836203, maxlat:6.741882, minlng:32.886753,maxlng:35.006764,path:"scenes_pngs/LE71710562007076.png"});
+window.sample_scenes.push({minlat:3.391035, maxlat:5.292663, minlng:32.608184,maxlng:34.722738,path:"scenes_pngs/LE71710572005262.png"});
+window.sample_scenes.push({minlat:1.942620, maxlat:3.848805, minlng:32.314454,maxlng:34.422181,path:"scenes_pngs/LE71710582005102.png"});
+window.sample_scenes.push({minlat:-0.941960, maxlat:0.955531, minlng:31.695821,maxlng:33.804533,path:"scenes_pngs/LE71710602005022.png"});
+window.sample_scene_bounds = [];
+window.sample_scene_bounds[0]=-0.941923;
+window.sample_scene_bounds[1]=36.324226;
+window.sample_scene_bounds[2]=0.950065;
+window.sample_scene_bounds[3]=38.491492;
+$('#samscene').change(function(){
+    dm.redraw();
+});
+
+var dm = new DrawMap("canvas");
+dm.setBackgroundImageFromURL("kenya_-1_5__38.png");
+dm.setGeoCenter(-1.5,38.0);
+dm.setCSSScaleFactor({width:1.0,height:1.0});
+dm.setZoom(7.0);
+//dm.enablePanning(true);
+//dm.enableDrawing(true);
+document.addEventListener('mouseMove',function(evt){
+	if(evt.detail=="canvas"){
+		var mxy = dm.mouse_position;
+		var glatlng = dm.convertXYToGeo(mxy.x,mxy.y);
+		$("#mlat").html(parseFloat(glatlng.lat).toFixed(3));
+		$("#mlng").html(parseFloat(glatlng.lng).toFixed(3));
+	}
+});
+document.addEventListener('mouseRight',function(evt){
+	//alert("Ding");
+	if(evt.detail=="canvas"){
+		$("#scene_composed").html("");
+		var mxy = dm.mouse_position;
+		var glatlng = dm.convertXYToGeo(mxy.x,mxy.y);
+		for(var i=0;i<window.preview_results.length;i++){
+			console.log(window.preview_results[i]);
+			console.log(glatlng);
+			if(dm.intersectLatLng(window.preview_results[i].minlat,window.preview_results[i].minlng,window.preview_results[i].maxlat,window.preview_results[i].maxlng,glatlng.lat,glatlng.lng,glatlng.lat+0.01,glatlng.lng+0.01)){
+				//alert("YES");
+				var w = new Worker("dcw.js?q="+Math.round((Math.random()*9999)));
+				w.postMessage("sceneslist#"+window.preview_results[i].stats);
+				w.onmessage = function(event){
+					var resp = event.data;
+					console.log(resp);
+					var obj = JSON.parse(resp);
+					if(obj.msg == "scenename"){
+						var ids = obj.ids.split(',');
+						console.log(ids);
+						for(var j=0;j<ids.length;j++){
+
+							$("#scene_composed").append("<li>"+ids[j]+"</li>");
+						}
+						w.terminate();
+					}
+				};
+
+			}
+		}
+	}
+});
+dm.hideDrawLine(true);
+dm.createGrid("#FF0000",1.0,1.0,true);
+//dm.debugMouseMovement(true);
+//dm.debugMouseMovement(true);
+document.addEventListener('redraw',function(evt){
+  console.log(evt);
+  if(evt.detail=="canvas"){
+    //dm.drawImageFromURL("http://bigdata-node2.ama-inc.com/kenya.png");
+    console.log("ding");
+    dm.setGeoCenter(-1.5,38.0);
+    dm.geoCenterXY();
+		dm.createGrid("#FF0000",1.0,1.0,true);
+		bb = dm.getDrawnBoundsLatLng();
+		var show_miss = document.getElementById("show_missing");
+		//var ss = document.getElementById("samscene");
+		/*if(ss.checked){
+
+			//dm.insertImageAtLatLng(window.sample_scene_bounds[0],window.sample_scene_bounds[1],window.sample_scene_bounds[2],window.sample_scene_bounds[3],"LE71680602015093SG100.png");
+		}*/
+
+		if(bb){
+
+			//window.tiles = [];
+			console.log(dm.getDrawnBoundsLatLng());
+			//get min/max
+			maxlat = bb.ul.lat;
+			minlat = bb.ll.lat;
+			dm.drawRectangeLatLng(bb.ll.lat,bb.ll.lng,bb.ur.lat,bb.ur.lng,"rgba(50,50,150,0.4)");
+
+		} else {
+
+		}
+		console.log("Redrawing tiles");
+		//console.log(window.tiles);
+		for(var i =0;i<window.tiles.length;i++){
+			tstr = window.tiles[i].split(',');
+			//console.log(window.tiles[i]);
+			y = parseFloat(tstr[0]);
+			x = parseFloat(tstr[1]);
+
+			timg = tstr[2];
+			//console.log(x+", "+y+": "+timg);
+			dm.insertImageAtLatLng(y,x,y+1.0,x+1.0,timg);
+		}
+
+
+		//Highlight selected scenes
+		for(var i=0;i<window.selected_mosaics.length;i++){
+			var itemEle = document.getElementById("mosaic_"+window.selected_mosaics[i]);
+			dm.drawBorderLatLng(itemEle.dataset.minlat,itemEle.dataset.minlng,itemEle.dataset.maxlat,itemEle.dataset.maxlng,"#FF00FF");
+		}
+
+		for(var i=0;i<window.preview_results.length;i++){
+			if(show_miss.checked){
+				dm.insertImageAtLatLng(window.preview_results[i].minlat,window.preview_results[i].minlng,window.preview_results[i].maxlat,window.preview_results[i].maxlng,window.preview_results[i].alternative);
+			}
+			else {
+				console.log("dm.insertImageAtLatLng(window.preview_results["+i+"].minlat,window.preview_results["+i+"].minlng,window.preview_results["+i+"].maxlat,window.preview_results["+i+"].maxlng,window.preview_results["+i+"].image);");
+				dm.insertImageAtLatLng(window.preview_results[i].minlat,window.preview_results[i].minlng,window.preview_results[i].maxlat,window.preview_results[i].maxlng,window.preview_results[i].image);
+			}
+		}
+/*
+		if(ss.checked){
+			console.log("Will display scenes");
+			//dm.insertImageAtLatLng(window.sample_scene_bounds[0],window.sample_scene_bounds[1],window.sample_scene_bounds[2],window.sample_scene_bounds[3],"LE71680602015093SG100.png");
+			for(var i=0;i<window.scenes_to_draw.length;i++){
+
+				var tmp_scene = window.scenes_to_draw[i];
+				//console.log("About to draw: "+tmp_scene.path);
+				dm.insertImageAtLatLng(tmp_scene.minlat,tmp_scene.minlng,tmp_scene.maxlat,tmp_scene.maxlng,tmp_scene.path);
+			}
+		}
+		*/
+  }
+});
+window.setTimeout(redraw,250);
+function redraw(){
+	dm.redraw();
+}
+
+function addScenes(minlat,minlng,maxlat,maxlng){
+	console.log("Checking scene intersections");
+	for(var i =0;i<window.sample_scenes.length;i++){
+		var tmp_scene = window.sample_scenes[i];
+		if(dm.intersectLatLng(minlat,minlng,maxlat,maxlng,tmp_scene.minlat,tmp_scene.minlng,tmp_scene.maxlat,tmp_scene.maxlng)){
+			//console.log("adding scene: "+tmp_scene.path);
+			window.scenes_to_draw.push(tmp_scene);
+		} else {
+			//console.log(tmp_scene.path+" "+minlat+", "+minlng+"does not intersect "+tmp_scene.minlat+", "+tmp_scene.minlng);
+		}
+	}
+}
+function addScenes_demo(){
+	console.log("Checking scene intersections");
+	for(var i =0;i<window.sample_scenes.length;i++){
+		var tmp_scene = window.sample_scenes[i];
+		window.scenes_to_draw.push(tmp_scene);
+	}
+}
+</script>
+</body>
+</html>
